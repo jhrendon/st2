@@ -30,6 +30,7 @@ from st2common.constants import action as ac_const
 from st2common.exceptions import action as ac_exc
 from st2common.exceptions import workflow as wf_exc
 from st2common import log as logging
+from st2common.models.api import notification as notify_api_models
 from st2common.models.db import liveaction as lv_db_models
 from st2common.models.db import workflow as wf_db_models
 from st2common.models.system import common as sys_models
@@ -178,7 +179,7 @@ def inspect_task_contents(wf_spec):
     return result
 
 
-def request(wf_def, ac_ex_db, st2_ctx):
+def request(wf_def, ac_ex_db, st2_ctx, notify_cfg=None):
     wf_ac_ex_id = str(ac_ex_db.id)
     LOG.info('[%s] Processing action execution request for workflow.', wf_ac_ex_id)
 
@@ -229,6 +230,13 @@ def request(wf_def, ac_ex_db, st2_ctx):
         errors=data['errors'],
         status=data['state']
     )
+
+    # Write notify instruction to record.
+    if notify_cfg:
+        wf_ex_db.notify = {
+            'config': notify_cfg,
+            'tasks': runner_params.get('notify')
+        }
 
     # Insert new record into the database and do not publish to the message bus yet.
     wf_ex_db = wf_db_access.WorkflowExecution.insert(wf_ex_db, publish=False)
@@ -503,6 +511,11 @@ def request_action_execution(wf_ex_db, task_ex_db, st2_ctx, ac_ex_req):
         context=ac_ex_ctx,
         parameters=ac_ex_params
     )
+
+    # Set notification if instructed.
+    if (wf_ex_db.notify and wf_ex_db.notify.get('config') and
+            wf_ex_db.notify.get('tasks') and task_ex_db.task_name in wf_ex_db.notify['tasks']):
+        lv_ac_db.notify = notify_api_models.NotificationsHelper.to_model(wf_ex_db.notify['config'])
 
     # Set the task execution to running first otherwise a race can occur
     # where the action execution finishes first and the completion handler
